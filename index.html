@@ -126,7 +126,7 @@
   .panel .hd h4{margin:0;font-size:14px;font-weight:650;letter-spacing:-.15px}
   .panel .hd .sub{font-size:12px;color:var(--muted)}
   .panel .bd{padding:19px}
-  .panel .bd.flush{padding:0}
+  .panel .bd.flush{padding:0;overflow-x:auto}
   .row2{display:grid;grid-template-columns:1.55fr 1fr;gap:18px;align-items:start}
 
   table{width:100%;border-collapse:collapse}
@@ -321,10 +321,10 @@ const ordersSeed = [
   {id:"ORD-1030", cust:"Karan Mehta", amt:41900, mode:"Online",  pay:"UPI",  status:"Returned",   date:"10 Oct"},
 ];
 const staffSeed = [
-  {name:"Suresh Kumar", role:"Manager", salary:42000, adv:5000, ded:1200, ot:3000, sales:186500, att:"26/26", status:"Pending"},
-  {name:"Neha Singh",   role:"Staff",   salary:24000, adv:2000, ded:0,    ot:1500, sales:92300,  att:"24/26", status:"Pending"},
-  {name:"Imran Ali",    role:"Staff",   salary:24000, adv:0,    ded:800,  ot:0,    sales:76800,  att:"25/26", status:"Paid"},
-  {name:"Divya Menon",  role:"Staff",   salary:22000, adv:3000, ded:500,  ot:1000, sales:54100,  att:"22/26", status:"Pending"},
+  {name:"Suresh Kumar", role:"Manager", salary:42000, adv:5000, ded:1200, ot:3000, join:"12 Apr 2023", leave:2, sales:186500, att:"26/26", status:"Pending"},
+  {name:"Neha Singh",   role:"Staff",   salary:24000, adv:2000, ded:0,    ot:1500, join:"08 Jan 2024", leave:4, sales:92300,  att:"24/26", status:"Pending"},
+  {name:"Imran Ali",    role:"Staff",   salary:24000, adv:0,    ded:800,  ot:0,    join:"20 Nov 2022", leave:1, sales:76800,  att:"25/26", status:"Paid"},
+  {name:"Divya Menon",  role:"Staff",   salary:22000, adv:3000, ded:500,  ot:1000, join:"15 Feb 2025", leave:6, sales:54100,  att:"22/26", status:"Pending"},
 ];
 const auditSeed = [
   {t:"12 Oct 14:32", who:"admin@dctech.com", act:"Payment verified", ent:"ORD-1042"},
@@ -528,10 +528,11 @@ function openProduct(id){
         <div class="price" style="font-size:20px;margin-top:8px">${inr(p.price)}
           ${off?`<span class="mrp">${inr(p.mrp)}</span> <span class="badge b-ok">${off}% off</span>`:""}</div>
         ${p.variants?`<div style="font-size:12.5px;margin-top:6px"><span style="color:var(--muted)">Variants:</span> ${p.variants}</div>`:""}
+        ${p.specs?`<div style="font-size:12.5px;margin-top:4px"><span style="color:var(--muted)">Specs:</span> ${p.specs}</div>`:""}
         <div style="color:var(--muted);font-size:12.5px;margin-top:6px">${p.stock>0?`In stock · ${p.stock} available`:`Out of stock`}</div>
       </div>
     </div>
-    <p style="color:var(--muted);font-size:13px;margin:16px 0 0">Genuine ${p.brand} product with brand warranty. Same live stock as our retail counter. Free delivery across India.</p>
+    <p style="color:var(--muted);font-size:13px;margin:16px 0 0">${p.desc||`Genuine ${p.brand} product with brand warranty. Same live stock as our retail counter. Free delivery across India.`}</p>
     <div class="field" style="margin-top:16px"><label>Quantity</label><input id="pd_qty" type="number" value="1" min="1" max="${p.stock}" /></div>
     <div class="mbtn">
       <button class="btn" onclick="addFromDetail(${p.id},this)">Add to cart</button>
@@ -632,8 +633,16 @@ function viewPOS(){
       <div class="hd"><h4>Current bill</h4></div>
       <div class="bd">
         <div id="posCart">${posCartRows()}</div>
-        <button class="btn" style="margin-top:15px" onclick="checkout()">Charge ${inr(cartTotal())}</button>
-        <button class="btn ghost" style="margin-top:9px" onclick="state.cart=[];render()">Clear</button>
+        <div class="field" style="margin:14px 0 10px"><label>Payment mode</label>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">
+            ${["Cash","UPI","Card","Bank"].map(m=>`<button class="buy sm" style="width:100%;padding:7px 0" onclick="toast('Payment mode: ${m}')">${m}</button>`).join("")}
+          </div></div>
+        <div class="field" style="margin-bottom:10px"><label>Discount (₹)</label><input id="posDisc" type="number" value="0" /></div>
+        <button class="btn" onclick="checkout()">Charge ${inr(cartTotal())}</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
+          <button class="btn ghost" onclick="toast('Return / exchange (demo)')">Return</button>
+          <button class="btn ghost" onclick="toast('Reprint last invoice (demo)')">Reprint</button></div>
+        <button class="btn ghost" style="margin-top:8px" onclick="state.cart=[];render()">Clear</button>
       </div>
     </div>
   </div>`;
@@ -671,6 +680,8 @@ function viewInventory(){
         <td>${stockBadge(p.stock)}</td>
         <td style="text-align:right;white-space:nowrap">
           <button class="buy sm" onclick="openBarcode(${p.id})">Barcode</button>
+          <button class="buy sm" style="margin-left:6px" onclick="openHistory(${p.id})">History</button>
+          <button class="buy sm" style="margin-left:6px" onclick="openTransfer(${p.id})">Transfer</button>
           <button class="buy sm" style="margin-left:6px" onclick="adjustStock(${p.id})">Adjust</button></td></tr>`).join("")}</tbody>
     </table></div>
   </div>`;
@@ -696,12 +707,14 @@ function viewPayroll(){
     <div class="hd"><h4>Staff payroll — October 2026</h4><div class="spacer" style="flex:1"></div>
       <button class="buy sm">Run payroll</button></div>
     <div class="bd flush"><table>
-      <thead><tr><th>Staff</th><th>Role</th><th class="ra">Base</th><th class="ra">Advance</th><th class="ra">Deduction</th><th class="ra">Net</th><th>Att.</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Staff</th><th>Role</th><th>Joined</th><th class="ra">Base</th><th class="ra">Advance</th><th class="ra">Deduction</th><th class="ra">Net</th><th>Leave</th><th>Status</th><th></th></tr></thead>
       <tbody>${staffSeed.map(s=>`<tr>
         <td class="nm">${s.name}</td><td><span class="mut">${s.role}</span></td>
+        <td><span class="mut">${s.join}</span></td>
         <td class="mono">${inr(s.salary)}</td><td class="mono">${inr(s.adv)}</td><td class="mono">${inr(s.ded)}</td>
-        <td class="mono"><b>${inr(s.salary+s.ot-s.adv-s.ded)}</b></td><td>${s.att}</td><td>${statusBadge(s.status)}</td>
-        <td style="text-align:right"><button class="buy sm" onclick="openSlip('${s.name}')">Slip</button></td></tr>`).join("")}</tbody>
+        <td class="mono"><b>${inr(s.salary+s.ot-s.adv-s.ded)}</b></td><td>${s.leave}</td><td>${statusBadge(s.status)}</td>
+        <td style="text-align:right;white-space:nowrap"><button class="buy sm" onclick="openSlip('${s.name}')">Slip</button>
+          <button class="buy sm" style="margin-left:6px" onclick="openHistory('${s.name}')">History</button></td></tr>`).join("")}</tbody>
     </table></div>
   </div>`;
 }
@@ -741,7 +754,8 @@ function viewSoftware(){
     ["DC_App_v1.8.apk","Android","27 MB"],["Barcode_Utility.exe","Windows","9 MB"],
     ["Thermal_Printer_Manual.pdf","Manual","3 MB"]];
   return `<div class="panel">
-    <div class="hd"><h4>Protected downloads — authorised users only</h4></div>
+    <div class="hd"><h4>Protected downloads — authorised users only</h4><div class="spacer" style="flex:1"></div>
+      <button class="buy sm" onclick="toast('Upload file (demo)')">+ Upload file</button></div>
     <div class="bd flush"><table>
       <thead><tr><th>File</th><th>Type</th><th>Size</th><th></th></tr></thead>
       <tbody>${files.map(([f,t,s])=>`<tr><td class="nm">${f}</td><td><span class="mut">${t}</span></td><td>${s}</td>
@@ -839,6 +853,9 @@ function openAddProduct(){
       <div class="field"><label>Brand</label><input id="np_brand" placeholder="Lenovo" /></div>
       <div class="field"><label>Category</label><input id="np_cat" placeholder="Laptops" /></div></div>
     <div class="field"><label>Variants (optional)</label><input id="np_var" placeholder="e.g. 8GB/256GB · 16GB/512GB" /></div>
+    <div class="field"><label>Description</label><input id="np_desc" placeholder="Short product description" /></div>
+    <div class="field"><label>Specifications</label><input id="np_spec" placeholder="e.g. i5 · 8GB RAM · 512GB SSD" /></div>
+    <div class="field"><label>Image URL (optional)</label><input id="np_img" placeholder="https://…" /></div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
       <div class="field"><label>Cost ₹</label><input id="np_cost" type="number" value="0" /></div>
       <div class="field"><label>Price ₹</label><input id="np_price" type="number" value="0" /></div>
@@ -856,7 +873,8 @@ function saveProduct(btn){
   if(!name){ toast("Product name required"); return; }
   LS.products.push({ id:Date.now(), name, brand:g("np_brand")||"-", cat:g("np_cat")||"General",
     cost:+g("np_cost")||0, price:+g("np_price")||0, mrp:+g("np_mrp")||0, stock:+g("np_stock")||0,
-    variants:g("np_var")||"", tag:name.slice(0,3).toUpperCase() });
+    variants:g("np_var")||"", desc:g("np_desc")||"", specs:g("np_spec")||"", img:g("np_img")||"",
+    tag:name.slice(0,3).toUpperCase() });
   save(); btn.closest(".modal-bg").remove(); toast(name+" added"); render();
 }
 function downloadCSV(name, head, rows){
@@ -1002,6 +1020,40 @@ function openTrack(no){
   </div>`;
   document.body.appendChild(bg);
 }
+function openHistory(key){
+  let title, rows;
+  const p=LS.products.find(x=>String(x.id)===String(key));
+  if(p){
+    title=p.name;
+    rows=[["Purchase entry","+20","12 Oct"],["Online sale","-2","12 Oct"],["POS sale","-1","11 Oct"],["Adjustment","-1","10 Oct"]];
+  } else {
+    const s=staffSeed.find(x=>x.name===key); title=s?s.name:key;
+    const sal=s?s.salary:0;
+    rows=[["Sep 2026",inr(sal),"Paid"],["Aug 2026",inr(sal),"Paid"],["Jul 2026",inr(sal),"Paid"]];
+  }
+  const bg=document.createElement("div"); bg.className="modal-bg";
+  bg.innerHTML=`<div class="modal" style="width:400px">
+    <h3 style="margin:0 0 4px">History</h3>
+    <p style="color:var(--muted);margin:0 0 16px">${title}</p>
+    <div style="border:1px solid var(--line);border-radius:10px;overflow:hidden"><table><tbody>
+      ${rows.map(r=>`<tr><td class="nm">${r[0]}</td><td style="text-align:right">${r[1]}</td><td><span class="mut">${r[2]}</span></td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="mbtn" style="margin-top:16px"><button class="btn ghost" onclick="this.closest('.modal-bg').remove()">Close</button></div>
+  </div>`;
+  document.body.appendChild(bg);
+}
+function openTransfer(id){
+  const p=LS.products.find(x=>x.id===id); if(!p) return;
+  const bg=document.createElement("div"); bg.className="modal-bg";
+  bg.innerHTML=`<div class="modal" style="width:390px">
+    <h3 style="margin:0 0 4px">Transfer stock</h3>
+    <p style="color:var(--muted);margin:0 0 16px">${p.name} — current ${p.stock}</p>
+    <div class="field"><label>To location</label><select id="tr_loc"><option>Main Store</option><option>Warehouse</option><option>Branch 2</option></select></div>
+    <div class="field"><label>Quantity</label><input id="tr_qty" type="number" value="1" /></div>
+    <div class="mbtn"><button class="btn" onclick="toast('Stock transferred (demo)');this.closest('.modal-bg').remove()">Transfer</button>
+      <button class="btn ghost" onclick="this.closest('.modal-bg').remove()">Cancel</button></div></div>`;
+  document.body.appendChild(bg);
+}
 function whatsappInvoice(no){
   const o=LS.orders.find(x=>x.id===no); if(!o) return;
   const msg=encodeURIComponent("DC Technologies — Invoice "+o.id+" — Amount "+inr(o.amt)+". Thank you for your order!");
@@ -1026,6 +1078,8 @@ if(q.get("open")==="slip"){ openSlip(q.get("name")||staffSeed[0].name); }
 if(q.get("open")==="barcode"){ openBarcode(+q.get("id")||1); }
 if(q.get("open")==="adjust"){ adjustStock(+q.get("id")||1); }
 if(q.get("open")==="track"){ openTrack(q.get("no")||LS.orders[0].id); }
+if(q.get("open")==="history"){ openHistory(q.get("key")||"1"); }
+if(q.get("open")==="transfer"){ openTransfer(+q.get("id")||1); }
 </script>
 </body>
 </html>
