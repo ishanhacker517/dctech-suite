@@ -208,6 +208,7 @@
     .search{width:160px}
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 </head>
 <body>
@@ -243,9 +244,9 @@
         </select>
       </div>
       <div class="field"><label>Email</label><input id="loginEmail" type="email" value="admin@dctech.com" /></div>
-      <div class="field"><label>Password</label><input id="loginPass" type="password" value="demo1234" /></div>
+      <div class="field"><label>Password</label><input id="loginPass" type="password" value="admin1234" /></div>
       <button class="btn" id="authBtn" onclick="doLogin()">Sign in</button>
-      <div class="demo-note">Demo mode — any email/password works. In production this is Supabase Auth.</div>
+      <div class="demo-note">Supabase login — <b>admin@dctech.com / admin1234</b> (Admin) or <b>staff@dctech.com / staff1234</b> (Staff).</div>
       <div class="hint">New customer? <a href="#" onclick="toggleSignup();return false" style="color:var(--accent);font-weight:600">Create an account</a></div>
     </div>
   </div>
@@ -343,9 +344,15 @@ const save = () => {
   localStorage.setItem("dc_orders", JSON.stringify(LS.orders));
 };
 
-/* ---- config: fill these after deploy (see README) ---- */
-const RAZORPAY_KEY_ID = "";   // your PUBLIC key, e.g. rzp_test_XXXXXXXX (never the secret)
-const API_BASE       = "";   // your Cloudflare Worker URL, e.g. https://dctech-api.xxx.workers.dev
+/* ---- config ---- */
+const SUPABASE_URL      = "https://eofpfnfdkbhqjywoonyv.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvZnBmbmZka2JocWp5d29vbnl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3NDM5MjEsImV4cCI6MjEwNzMxOTkyMX0.N3zMsyf6n8lfjo4rVs8fvbdyqHplRgR8xqFjuVpusH8";
+const RAZORPAY_KEY_ID   = "";   // your PUBLIC key, e.g. rzp_test_XXXXXXXX (never the secret)
+const API_BASE          = "";   // your Cloudflare Worker URL, e.g. https://dctech-api.xxx.workers.dev
+let sb = null;
+if (window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY) {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
 
 const state = { user:null, role:null, cart:[], route:"dashboard" };
 
@@ -368,9 +375,20 @@ const TITLES = { dashboard:"Dashboard", shop:"Storefront", pos:"POS & Billing", 
   software:"Software Downloads", email:"Company Email", users:"Users & Roles", audit:"Audit Log", settings:"Settings" };
 
 /* ---------- auth ---------- */
-function doLogin(){
-  const role = document.getElementById("loginRole").value;
+async function doLogin(){
+  const roleSel = document.getElementById("loginRole").value;
   const email = (document.getElementById("loginEmail").value||"user@dctech.com").trim();
+  const pass  = document.getElementById("loginPass").value||"";
+  let role = roleSel;
+  if (sb) {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+    if (error) { toast("Login failed: " + error.message); return; }
+    try {
+      const { data: prof } = await sb.from("profiles").select("role").eq("id", data.user.id).single();
+      if (prof && prof.role) role = prof.role;
+    } catch (_) {}
+    await loadProducts();
+  }
   state.user = email; state.role = role; state.route = NAV[role][0][0];
   document.getElementById("login").classList.add("hide");
   document.getElementById("app").classList.remove("hide");
@@ -378,6 +396,35 @@ function doLogin(){
   document.getElementById("sideUser").textContent = email.split("@")[0];
   document.getElementById("avatar").textContent = email[0].toUpperCase();
   buildNav(); render();
+}
+async function loadProducts(){
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from("products").select("*").order("id");
+    if (error) throw error;
+    if (data && data.length) {
+      LS.products = data.map(p => ({ id:p.id, name:p.name, brand:p.brand||"-", cat:p.category||"General",
+        cost:p.cost_price, price:p.price, mrp:p.mrp, stock:p.stock, sku:p.sku,
+        tag:(p.name||"P").slice(0,3).toUpperCase(), desc:"", specs:"", variants:"" }));
+      save();
+    }
+  } catch (e) { console.log("products load:", e.message); }
+}
+async function pushOrder(amount, pay, items){
+  if (!sb) return;
+  try {
+    const gst = Math.round(amount * 0.18 / 1.18);
+    const { data, error } = await sb.from("orders").insert({
+      order_no: "ORD-" + Date.now().toString(36).toUpperCase(), channel: "online",
+      subtotal: amount - gst, gst: gst, total: amount, payment_mode: pay, status: "paid"
+    }).select().single();
+    if (error) throw error;
+    if (items && items.length) {
+      await sb.from("order_items").insert(items.map(c => ({
+        order_id: data.id, product_id: c.id, name: c.name, qty: c.qty,
+        unit_price: c.price, line_total: c.price * c.qty })));
+    }
+  } catch (e) { console.log("order push:", e.message); }
 }
 function logout(){ location.reload(); }
 
@@ -618,9 +665,12 @@ function openRazorpay(amount){
 }
 function paySuccess(btn,amount,mode){
   btn.closest(".modal-bg").remove();
+  const items = state.cart.map(c=>({id:c.id,name:c.name,qty:c.qty,price:c.price}));
   state.cart.forEach(c=>{ const p=LS.products.find(x=>x.id===c.id); if(p) p.stock=Math.max(0,p.stock-c.qty); });
   const o={id:"ORD-"+(1043+LS.orders.length),cust:state.user.split("@")[0],amt:amount,mode:"Online",pay:mode,status:"Processing",date:"Today"};
-  LS.orders.unshift(o); save(); state.cart=[];
+  LS.orders.unshift(o); save();
+  pushOrder(amount, mode, items);
+  state.cart=[];
   toast("Payment successful — order "+o.id+" placed"); render();
 }
 
